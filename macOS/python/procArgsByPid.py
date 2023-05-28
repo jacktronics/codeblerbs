@@ -13,68 +13,73 @@ It uses the KERN_PROCARGS2 sysctl call, which is unique to macOS and uses a rath
 
 """
 import sys, json
-from os import sysconf
 from ctypes import CDLL, create_string_buffer, c_int, c_int32, c_size_t, sizeof, byref, memmove, pointer 
 
 # Loading C library functions through ctypes
 
 libc = CDLL('libc.dylib')
 
-# Defining some magic numbers for the SYSCTL call, retrieving the current system ARG_MAX size
+# Defining some magic numbers for the SYSCTL calls, including ARG_MAX as a dependancy
 
 CTL_KERN = 1
+KERN_ARGMAX = 8
+ARGMAX_ARGCOUNT = 2
 KERN_PROCARGS2 = 49
-ARG_MAX = sysconf('SC_ARG_MAX')
+PROCARG2_ARGCOUNT = 3
 
-def progArgsByPid(PID):
-    PROCARG2_SYSCTL_DEF = ( CTL_KERN, KERN_PROCARGS2, PID )
-    dataBlob = create_string_buffer(ARG_MAX)
-    sysctlCallDef = c_int * len(PROCARG2_SYSCTL_DEF)
-    sysctlCall = sysctlCallDef()
-    for i, v in enumerate(PROCARG2_SYSCTL_DEF):
-        sysctlCall[i] = c_int(v)
-    dataBlobSize = c_size_t(sizeof(dataBlob))
-    result = libc.sysctl(sysctlCall, len(PROCARG2_SYSCTL_DEF), byref(dataBlob), byref(dataBlobSize), None, c_size_t(0))
+def get_ARGMAX_c_size_t() -> c_size_t:
+    SYSCTL_CALL = ( c_int * ARGMAX_ARGCOUNT )( CTL_KERN, KERN_ARGMAX )
+    ARGMAX = c_int()
+    result = libc.sysctl(SYSCTL_CALL, ARGMAX_ARGCOUNT, byref(ARGMAX), byref(c_size_t(sizeof(ARGMAX))), None, c_size_t(0))
+    return c_size_t(ARGMAX.value)
+
+def progArgsByPid(PID: int) -> dict:
+    SYSCTL_CALL = ( c_int * PROCARG2_ARGCOUNT )( CTL_KERN, KERN_PROCARGS2, PID )
+    BLOB = create_string_buffer(ARGMAX.value)
+    result = libc.sysctl(SYSCTL_CALL, PROCARG2_ARGCOUNT, byref(BLOB), byref(ARGMAX), None, c_size_t(0))
     if result == 0:
-        rawData = dataBlob.raw
-        aBytes = bytes(rawData)
+        byteArray = BLOB.raw
         argCount = c_int32()
-        memmove(pointer(argCount), aBytes, sizeof(argCount))
+        memmove(pointer(argCount), byteArray, sizeof(argCount))
         idx = str_start = sizeof(argCount)
         procArg2DataStruct = {
             "argc" : argCount.value,
             "argv" : [],
             "env_variables" : []
         }
+        #empty result case
+        if byteArray[idx] == 0:
+            return procArg2DataStruct
         #scanning for program path
         while True:
-            if rawData[idx] == 0:
-                procArg2DataStruct['program'] = rawData[str_start:idx].decode('utf-8')
+            if byteArray[idx] == 0:
+                procArg2DataStruct['program'] = byteArray[str_start:idx].decode('utf-8')
                 offset = 8 - ( len(procArg2DataStruct['program']) % 8 )
-                str_start = idx + offset + 1
-                idx += 1
+                str_start = idx = idx + offset
                 break
             idx += 1
         #scanning for argv
         while argCount.value != 0:
-            if rawData[idx] == 0 and rawData[idx-1] != 0:
-                procArg2DataStruct['argv'].append(rawData[str_start:idx].decode('utf-8'))
+            if byteArray[idx] == 0 and byteArray[idx-1] != 0:
+                procArg2DataStruct['argv'].append(byteArray[str_start:idx].decode('utf-8'))
                 argCount.value -= 1
-            if rawData[idx] != 0 and rawData[idx-1] == 0:
+            elif byteArray[idx] != 0 and byteArray[idx-1] == 0:
                 str_start = idx
             idx += 1
         # environment variables
-        while True:
-            if rawData[idx] == 0 and rawData[idx-1] == 0:
+        while idx < len(byteArray):
+            if byteArray[idx] == 0 and byteArray[idx-1] == 0:
                 break
-            if rawData[idx] == 0 and rawData[idx-1] != 0:
-                procArg2DataStruct['env_variables'].append(rawData[str_start:idx].decode('utf-8'))
-            if rawData[idx] != 0 and rawData[idx-1] == 0:
+            elif byteArray[idx] == 0 and byteArray[idx-1] != 0:
+                procArg2DataStruct['env_variables'].append(byteArray[str_start:idx].decode('utf-8'))
+            elif byteArray[idx] != 0 and byteArray[idx-1] == 0:
                 str_start = idx
             idx += 1
         return procArg2DataStruct
     else:
         print('sysctl call failure')
+
+ARGMAX = get_ARGMAX_c_size_t()
 
 def main(argv):
     if len(argv) != 2:
