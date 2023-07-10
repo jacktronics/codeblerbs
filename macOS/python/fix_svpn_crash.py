@@ -23,7 +23,17 @@ STD_HOST_FILE_PATH = '/private/etc/hosts'
 
 IF_NAMESIZE = 16
 MAXHOSTNAMELEN = 256
+# SIOCGIFFLAGS, a 4-byte wide command
+# Byte 3 : 0xc0 for 'COPY PARAMETERS OUT' (0x40) + 'COPY PARAMETERS IN' (0x80)
+# Byte 2 : 0x20 aka 32 for the size of struct ifreq
+# Byte 1 : 0x69 aka 105 for ASCII 'i', meaning IO controls, there are 's' aka socket controls ...
+# Byte 0 : 0x11 aka 17 for GET IFNET FLAGS
 SIOCGIFFLAGS = 0xc0206911
+# SIOCSIFFLAGS, a 4-byte wide command
+# Byte 3 : 0x80 for 'COPY PARAMETERS IN'
+# Byte 2 : 0x20 aka 32 for the size of struct ifreq
+# Byte 1 : 0x69 aka 105 for ASCII 'i', meaning IO controls, there are 's' aka socket controls ...
+# Byte 0 : 0x10 aka 16 for SET IFNET FLAGS
 SIOCSIFFLAGS = 0x80206910
 
 class RTF(enum.Enum):
